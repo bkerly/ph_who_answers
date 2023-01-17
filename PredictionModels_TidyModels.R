@@ -309,64 +309,66 @@ bind_rows(rf_auc, lr_auc) %>%
   labs(color = "Model")
 
 ### Nothing beyond here works!
+# To do: Test the best parameters with the test data set to see if it works good.
 
 
-# Let's test the model we like --------------------------------------------
-# the best model
-last_rf_mod <- 
-  rand_forest(mtry = 14, min_n = 26, trees = 1000) %>% 
-  set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
-  set_mode("classification")
-
-rf_recipe_test <- 
-  recipe(completed_interview ~ ., data = data_test) %>% 
-  step_date(interview_initiate_date) %>% 
-  step_holiday(interview_initiate_date) %>% 
-  step_rm(interview_initiate_date) 
-
-# the last workflow
-last_rf_workflow <- 
-  rf_workflow %>% 
-  update_model(last_rf_mod) %>%
-  update_recipe(rf_recipe_test)
-
-set.seed(345)
-last_rf_fit <- 
-  last_rf_workflow 
-
-last_rf_fit %>% 
-  collect_metrics()
-
-rf_auc <- 
-  rf_res %>% 
-  collect_predictions(parameters = rf_best) %>% 
-  roc_curve(completed_interview, .pred_FALSE) %>% 
-  mutate(model = "Random Forest")
-
-# Deeper dive into the best RF model ---------------------------------
-
-# the last model
-last_rf_mod <- 
-  rand_forest(mtry = 14, min_n = 26, trees = 1000) %>% 
-  set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
-  set_mode("classification")
-
-# the last workflow
-last_rf_workflow <- 
-  rf_workflow %>% 
-  update_model(last_rf_mod)
-
-# the last fit
-set.seed(345)
-last_rf_fit <- 
-  last_rf_workflow %>% 
-  last_fit(splits)
-
-last_rf_fit
-
-last_rf_fit %>% 
-  collect_metrics()
-
-last_rf_fit %>% 
-  extract_fit_parsnip() %>% 
-  vip(num_features = 20)
+# 
+# # Let's test the model we like --------------------------------------------
+# # the best model
+# last_rf_mod <- 
+#   rand_forest(mtry = 14, min_n = 26, trees = 1000) %>% 
+#   set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
+#   set_mode("classification")
+# 
+# rf_recipe_test <- 
+#   recipe(completed_interview ~ ., data = data_test) %>% 
+#   step_date(interview_initiate_date) %>% 
+#   step_holiday(interview_initiate_date) %>% 
+#   step_rm(interview_initiate_date) 
+# 
+# # the last workflow
+# last_rf_workflow <- 
+#   rf_workflow %>% 
+#   update_model(last_rf_mod) %>%
+#   update_recipe(rf_recipe_test)
+# 
+# set.seed(345)
+# last_rf_fit <- 
+#   last_rf_workflow 
+# 
+# last_rf_fit %>% 
+#   collect_metrics()
+# 
+# rf_auc <- 
+#   rf_res %>% 
+#   collect_predictions(parameters = rf_best) %>% 
+#   roc_curve(completed_interview, .pred_FALSE) %>% 
+#   mutate(model = "Random Forest")
+# 
+# # Deeper dive into the best RF model ---------------------------------
+# 
+# # the last model
+# last_rf_mod <- 
+#   rand_forest(mtry = 14, min_n = 26, trees = 1000) %>% 
+#   set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
+#   set_mode("classification")
+# 
+# # the last workflow
+# last_rf_workflow <- 
+#   rf_workflow %>% 
+#   update_model(last_rf_mod)
+# 
+# # the last fit
+# set.seed(345)
+# last_rf_fit <- 
+#   last_rf_workflow %>% 
+#   last_fit(splits)
+# 
+# last_rf_fit
+# 
+# last_rf_fit %>% 
+#   collect_metrics()
+# 
+# last_rf_fit %>% 
+#   extract_fit_parsnip() %>% 
+#   vip(num_features = 20)
