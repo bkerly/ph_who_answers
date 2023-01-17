@@ -1,9 +1,20 @@
 ##tidy models
 ### predictive modeling case study https://www.tidymodels.org/start/case-study/
 
-####READ IN DATA & REFACTOR:
+# Load Libraries ----------------------------------------------------------
+
+library(tidyverse)
 library(readxl)
-modeldata <- read_excel("C:/Users/maramire/Desktop/IPG3.0/modeldata.xlsx", 
+library(tidymodels)
+library(lubridate)
+library(ggthemes)
+library(viridis)
+library(vip)
+
+
+# READ IN DATA & REFACTOR -------------------------------------------------
+
+modeldata <- read_excel("data/modeldata.xlsx", 
                         col_types = c("text", "numeric", "text", 
                                       "date", "date", "numeric", "numeric", 
                                       "text", "text", "text", "text", "text", 
@@ -16,41 +27,79 @@ modeldata <- read_excel("C:/Users/maramire/Desktop/IPG3.0/modeldata.xlsx",
                                       "numeric", "numeric", "numeric", "numeric", "numeric", 
                                       "numeric", "numeric", "numeric", "numeric", 
                                       "numeric", "numeric", "numeric", "text"))
+
+summary(modeldata)
+
 View(modeldata)
 
-##Change Reference Levels
-levels(modeldata$completedint)
-modeldata$completedint <- relevel(modeldata$completedint, ref = "Y")
+# There are a lot of variables in modeldata that probably don't help out with the model, and others are coded weird, so I'm gonna do some transmute action and fix them (supercedes a lot of cleanup work commented out below)
 
-levels(modeldata$race)
-modeldata$race <- relevel(modeldata$race, ref = "white") ##white as reference category
+data_tidy <- modeldata %>%
+  transmute(
+    id = id,
+    completed_interview = completedinterviews == 1,
+    interview_initiate_date = ymd(interview_initated_date),
+    days_since_covid_start = time_since_covid_start,
+    age = age,
+    gender = relevel(as.factor(gender), ref = "female"),
+    race = relevel(as.factor(race), ref = "black"),
+    ethnicity = (ethnicity == "hispanic"), #What if nonwhite, non male was the default? Let's try it once maybe!
+    interpreter_required = (interpreter_required == "yes"),
+    county = county,
+    tract_poptotal = tract_poptotal,
+    tract_popdensitysqmi = tract_popdensitysqmi,
+    tract_nhl_wa = tract_nhl_wa,
+    tract_white = tract_white,
+    tract_minorityrace = tract_minorityrace,
+    tract_englishltvw = tract_englishltvw,
+    tract_laborforce = tract_laborforce,
+    tract_unemployed = tract_unemployed,
+    tract_healthsocialfactor = tract_healthsocialfactor,
+    tract_pop_under5 = tract_pop_under5,
+    tract_pop_over64 = tract_pop_over64,
+    tract_lifeexpectancy = tract_lifeexpectancy,
+    tract_poc = tract_poc,
+    tract_lessthanhs = tract_lessthanhs,
+    tract_lowincome = tract_lowincome,
+    tract_disability = tract_disability,
+    tract_housingcost = tract_housingcost,
+    county_positivityrate = county_positivityrate,
+    county_rateper100000 = county_rateper100000,
+    county_deathsper100000 = 100000 * county_deaths / county_population, # Maybe it's better as a rate?
+    completionrate = completionrate # Is this county call completion rate?
+  )
 
-levels(modeldata$ethnicity)
-modeldata$ethnicity <- relevel(modeldata$ethnicity, ref = "not_hispanic")
+# ##Change Reference Levels
+# levels(modeldata$completedint)
+# modeldata$completedint <- relevel(modeldata$completedint, ref = "Y")
+# 
+# levels(modeldata$race)
+# modeldata$race <- relevel(modeldata$race, ref = "white") ##white as reference category
+# 
+# levels(modeldata$ethnicity)
+# modeldata$ethnicity <- relevel(modeldata$ethnicity, ref = "not_hispanic")
 
 
 
 ####
-library(tidymodels)
-library(viridis)
-library(vip)
 
-dim(modeldata)
+dim(data_tidy)
 
-mod <- modeldata %>% 
-  count(completedint) %>% 
+mod <- data_tidy %>% 
+  count(completed_interview) %>% 
   mutate(prop = n/sum(n))
 
 ##92% yes and 8% no
 ## will need data splitting strategy and resample to balance
-### NOTE: anytime 'children' is referenced it refers to 'completedint' (completed interviews) in our data
+### NOTE: anytime 'children' is referenced  in the source doc it refers to 'completedint' (completed interviews) in our data
 
 
 set.seed(123)
-splits      <- initial_split(modeldata, strata = completedint)
+splits      <- initial_split(data_tidy, strata = completed_interview)
 
-hotel_other <- training(splits)
-hotel_test  <- testing(splits)
+# Renaming these so they aren't confusing later
+data_training <- training(splits)
+data_test  <- testing(splits)
 
 # training set proportions by completedint
 hotel_other %>% 
