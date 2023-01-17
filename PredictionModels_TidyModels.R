@@ -10,6 +10,7 @@ library(lubridate)
 library(ggthemes)
 library(viridis)
 library(vip)
+library(missRanger)
 
 
 # READ IN DATA & REFACTOR -------------------------------------------------
@@ -37,14 +38,14 @@ View(modeldata)
 data_tidy <- modeldata %>%
   transmute(
     id = id,
-    completed_interview = completedinterviews == 1,
+    completed_interview = (completedinterviews == 1) %>% as.factor(),
     interview_initiate_date = ymd(interview_initated_date),
     days_since_covid_start = time_since_covid_start,
     age = age,
-    gender = relevel(as.factor(gender), ref = "female"),
-    race = relevel(as.factor(race), ref = "black"),
-    ethnicity = (ethnicity == "hispanic"), #What if nonwhite, non male was the default? Let's try it once maybe!
-    interpreter_required = (interpreter_required == "yes"),
+    gender = relevel(as.factor(gender), ref = "female") %>% as.numeric(),
+    race = relevel(as.factor(race), ref = "black") %>% as.numeric(),
+    ethnicity = (ethnicity == "hispanic") %>% as.numeric(), #What if nonwhite, non male was the default? Let's try it once maybe!
+    interpreter_required = (interpreter_required == "yes") %>% as.numeric(),
     county = county,
     tract_poptotal = tract_poptotal,
     tract_popdensitysqmi = tract_popdensitysqmi,
@@ -67,7 +68,10 @@ data_tidy <- modeldata %>%
     county_rateper100000 = county_rateper100000,
     county_deathsper100000 = 100000 * county_deaths / county_population, # Maybe it's better as a rate?
     completionrate = completionrate # Is this county call completion rate?
-  )
+  ) %>%
+  
+  #There are some missing values so we're going to impute them.
+  missRanger(num.trees = 100)
 
 # ##Change Reference Levels
 # levels(modeldata$completedint)
@@ -98,17 +102,17 @@ set.seed(123)
 splits      <- initial_split(data_tidy, strata = completed_interview)
 
 # Renaming these so they aren't confusing later
-data_training <- training(splits)
+data_non_test <- training(splits)
 data_test  <- testing(splits)
 
-# training set proportions by completedint
-hotel_other %>% 
-  count(completedint) %>% 
+# training set proportions by completed_interview
+data_non_test %>% 
+  count(completed_interview) %>% 
   mutate(prop = n/sum(n))
 
 # test set proportions by completedint
-hotel_test  %>% 
-  count(completedint) %>% 
+data_test  %>% 
+  count(completed_interview) %>% 
   mutate(prop = n/sum(n))
 
 # We'll use the validation_split() function to allocate 20% of the hotel_other stays to the validation set and 
@@ -117,8 +121,8 @@ hotel_test  %>%
 # reliable indicator for how well each model predicts the outcome with a single iteration of resampling.
 
 set.seed(234)
-val_set <- validation_split(hotel_other, 
-                            strata = completedint, 
+val_set <- validation_split(data_non_test, 
+                            strata = completed_interview, 
                             prop = 0.80)
 val_set
 
@@ -153,10 +157,10 @@ holidays <- c("AllSouls", "AshWednesday", "ChristmasEve", "Easter",
               "ChristmasDay", "GoodFriday", "NewYearsDay", "PalmSunday")
 
 lr_recipe <- 
-  recipe(completedint ~ ., data = hotel_other) %>% 
-  step_date(interview_complete_date) %>% 
-  step_holiday(interview_complete_date, holidays = holidays) %>% 
-  step_rm(interview_complete_date) %>% 
+  recipe(completed_interview ~ ., data = data_non_test) %>% 
+  step_date(interview_initiate_date) %>% 
+  step_holiday(interview_initiate_date, holidays = holidays) %>% 
+  step_rm(interview_initiate_date) %>% 
   step_dummy(all_nominal_predictors()) %>% 
   step_zv(all_predictors()) %>% 
   step_normalize(all_predictors())
