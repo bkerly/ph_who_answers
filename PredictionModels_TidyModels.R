@@ -11,6 +11,7 @@ library(ggthemes)
 library(viridis)
 library(vip)
 library(missRanger)
+library(glmnet)
 
 
 # READ IN DATA & REFACTOR -------------------------------------------------
@@ -98,6 +99,10 @@ mod <- data_tidy %>%
 ### NOTE: anytime 'children' is referenced  in the source doc it refers to 'completedint' (completed interviews) in our data
 
 
+# Create data splits ------------------------------------------------------
+
+
+
 set.seed(123)
 splits      <- initial_split(data_tidy, strata = completed_interview)
 
@@ -132,7 +137,10 @@ val_set
 # in our new validation and training sets, as compared to the original hotel_other proportions.
 
 
-##a First Model: Penalized Logistic Regression
+
+# ## First Model: Penalized Logistic Regression ---------------------------
+
+
 # ### Since our outcome variable children is categorical, logistic regression would be a good first model to start.
 # Let's use a model that can perform feature selection during training. 
 # The glmnet R package fits a generalized linear model via penalized maximum likelihood. 
@@ -177,10 +185,12 @@ lr_reg_grid %>% top_n(-5) # lowest penalty values
 lr_reg_grid %>% top_n(5)  # highest penalty values
 
 
-#train and tune model
+
+# Train and tune LR model -------------------------------------------------
+
 
 ###ERROR
-library(glmnet)
+
 
 lr_res <- 
   lr_workflow %>% 
@@ -201,8 +211,30 @@ lr_plot <-
 lr_plot
 
 
+# Check out our top performing models
 
+top_models <-
+  lr_res %>% 
+  show_best("roc_auc", n = 15) %>% 
+  arrange(penalty) 
+top_models
 
+# Look at our best model
+lr_best <- 
+  lr_res %>% 
+  collect_metrics() %>% 
+  arrange(penalty) %>% 
+  slice(13)
+lr_best
+
+# Plot our best model
+lr_auc <- 
+  lr_res %>% 
+  collect_predictions(parameters = lr_best) %>% 
+  roc_curve(completed_interview, .pred_FALSE) %>% 
+  mutate(model = "Logistic Regression")
+
+autoplot(lr_auc)
 
 # A SECOND MODEL: TREE-BASED ENSEMBLE 
 
@@ -217,10 +249,10 @@ rf_mod <-
 
 
 rf_recipe <- 
-  recipe(completedint ~ ., data = hotel_other) %>% 
-  step_date(interview_complete_date) %>% 
-  step_holiday(interview_complete_date) %>% 
-  step_rm(interview_complete_date) 
+  recipe(completed_interview ~ ., data = data_non_test) %>% 
+  step_date(interview_initiate_date) %>% 
+  step_holiday(interview_initiate_date) %>% 
+  step_rm(interview_initiate_date) 
 
 
 rf_workflow <- 
@@ -233,7 +265,8 @@ rf_mod
 extract_parameter_set_dials(rf_mod)
 
 
-set.seed(345) ####ERROR for missing values
+set.seed(345) ####ERROR for missing values.
+#Now there are no more missing values! Instead we imputed them.
 rf_res <- 
   rf_workflow %>% 
   tune_grid(val_set,
@@ -243,3 +276,59 @@ rf_res <-
 
 rf_res %>% 
   show_best(metric = "roc_auc")
+
+autoplot(rf_res)
+
+rf_best <- 
+  rf_res %>% 
+  select_best(metric = "roc_auc")
+
+rf_best
+
+rf_res %>% 
+  collect_predictions()
+
+rf_auc <- 
+  rf_res %>% 
+  collect_predictions(parameters = rf_best) %>% 
+  roc_curve(completed_interview, .pred_FALSE) %>% 
+  mutate(model = "Random Forest")
+
+autoplot(rf_auc)
+
+bind_rows(rf_auc, lr_auc) %>% 
+  ggplot() + 
+  geom_path(aes(x = 1 - specificity, y = sensitivity, color = model),
+            linewidth = 1.5, alpha = 0.8) +
+  geom_abline(lty = 3) + 
+  coord_equal() + 
+  theme_fivethirtyeight()
+
+
+# Test whether it fits the test set, too! ---------------------------------
+
+# the last model
+last_rf_mod <- 
+  rand_forest(mtry = 14, min_n = 26, trees = 1000) %>% 
+  set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
+  set_mode("classification")
+
+# the last workflow
+last_rf_workflow <- 
+  rf_workflow %>% 
+  update_model(last_rf_mod)
+
+# the last fit
+set.seed(345)
+last_rf_fit <- 
+  last_rf_workflow %>% 
+  last_fit(splits)
+
+last_rf_fit
+
+last_rf_fit %>% 
+  collect_metrics()
+
+last_rf_fit %>% 
+  extract_fit_parsnip() %>% 
+  vip(num_features = 20)
