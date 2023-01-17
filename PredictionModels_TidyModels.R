@@ -189,7 +189,6 @@ lr_reg_grid %>% top_n(5)  # highest penalty values
 # Train and tune LR model -------------------------------------------------
 
 
-###ERROR
 
 
 lr_res <- 
@@ -236,7 +235,10 @@ lr_auc <-
 
 autoplot(lr_auc)
 
-# A SECOND MODEL: TREE-BASED ENSEMBLE 
+
+# Random forest model -----------------------------------------------------
+
+
 
 cores <- parallel::detectCores()
 cores
@@ -297,15 +299,51 @@ rf_auc <-
 autoplot(rf_auc)
 
 bind_rows(rf_auc, lr_auc) %>% 
+  select(-.threshold) %>%
   ggplot() + 
   geom_path(aes(x = 1 - specificity, y = sensitivity, color = model),
             linewidth = 1.5, alpha = 0.8) +
-  geom_abline(lty = 3) + 
-  coord_equal() + 
-  theme_fivethirtyeight()
+  geom_abline(linetype = 3,linewidth = 1) + 
+#coord_equal() + 
+  theme_fivethirtyeight() +
+  labs(color = "Model")
+
+### Nothing beyond here works!
 
 
-# Test whether it fits the test set, too! ---------------------------------
+# Let's test the model we like --------------------------------------------
+# the best model
+last_rf_mod <- 
+  rand_forest(mtry = 14, min_n = 26, trees = 1000) %>% 
+  set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
+  set_mode("classification")
+
+rf_recipe_test <- 
+  recipe(completed_interview ~ ., data = data_test) %>% 
+  step_date(interview_initiate_date) %>% 
+  step_holiday(interview_initiate_date) %>% 
+  step_rm(interview_initiate_date) 
+
+# the last workflow
+last_rf_workflow <- 
+  rf_workflow %>% 
+  update_model(last_rf_mod) %>%
+  update_recipe(rf_recipe_test)
+
+set.seed(345)
+last_rf_fit <- 
+  last_rf_workflow 
+
+last_rf_fit %>% 
+  collect_metrics()
+
+rf_auc <- 
+  rf_res %>% 
+  collect_predictions(parameters = rf_best) %>% 
+  roc_curve(completed_interview, .pred_FALSE) %>% 
+  mutate(model = "Random Forest")
+
+# Deeper dive into the best RF model ---------------------------------
 
 # the last model
 last_rf_mod <- 
