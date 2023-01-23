@@ -334,7 +334,6 @@ lr_aug %>%
 
 lr_aug %>%
   roc_auc(truth = completed_interview,.pred_FALSE)
-
 # Area under the curve - 0.769.
 
 
