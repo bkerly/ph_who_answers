@@ -32,19 +32,19 @@ modeldata <- read_excel("data/modeldata.xlsx",
 
 summary(modeldata)
 
-View(modeldata)
+#View(modeldata)
 
 # There are a lot of variables in modeldata that probably don't help out with the model, and others are coded weird, so I'm gonna do some transmute action and fix them (supercedes a lot of cleanup work commented out below)
 
 data_tidy <- modeldata %>%
   transmute(
-    id = id,
+    #id = id,
     completed_interview = (completedinterviews == 1) %>% as.factor(),
     interview_initiate_date = ymd(interview_initated_date),
     days_since_covid_start = time_since_covid_start,
     age = age,
     gender = relevel(as.factor(gender), ref = "female") %>% as.numeric(),
-    race = relevel(as.factor(race), ref = "black") %>% as.numeric(),
+    race = relevel(as.factor(race), ref = "black"),
     ethnicity = (ethnicity == "hispanic") %>% as.numeric(), #What if nonwhite, non male was the default? Let's try it once maybe!
     interpreter_required = (interpreter_required == "yes") %>% as.numeric(),
     county = county,
@@ -195,7 +195,7 @@ lr_res <-
   lr_workflow %>% 
   tune_grid(val_set,
             grid = lr_reg_grid,
-            control = control_grid(save_pred = TRUE),
+            control = control_grid(save_pred = TRUE,extract = extract_fit_engine),
             metrics = metric_set(roc_auc))
 
 lr_plot <- 
@@ -226,7 +226,7 @@ lr_best <-
   slice(13)
 lr_best
 
-# Plot our best model
+# Plot AUC for our best model
 lr_auc <- 
   lr_res %>% 
   collect_predictions(parameters = lr_best) %>% 
@@ -234,6 +234,15 @@ lr_auc <-
   mutate(model = "Logistic Regression")
 
 autoplot(lr_auc)
+
+# Get variable values for our best model
+# cf: https://stackoverflow.com/questions/63087592/how-to-extract-glmnet-coefficients-produced-by-tidymodels
+extracted_linear_model <- lr_workflow %>%
+  finalize_workflow(lr_best) %>%
+  fit(data_non_test) %>%
+  extract_fit_parsnip() %>%
+  tidy() %>%
+  arrange(desc(abs(estimate)))
 
 
 # Random forest model -----------------------------------------------------
@@ -246,7 +255,7 @@ cores
 
 rf_mod <- 
   rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>% 
-  set_engine("ranger", num.threads = cores) %>% 
+  set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
   set_mode("classification")
 
 
@@ -308,6 +317,32 @@ bind_rows(rf_auc, lr_auc) %>%
   theme_fivethirtyeight() +
   labs(color = "Model")
 
+# extract the best rf model
+extracted_rf_model <- rf_workflow %>%
+  finalize_workflow(rf_best) %>%
+  fit(data_non_test) %>%
+  extract_fit_engine() 
+
+extracted_rf_model %>%
+  ranger::importance_pvalues(method = "janitza")
+
+# Plot variable importance
+feat_imp_df <- importance(extracted_rf_model) %>% 
+  data.frame() %>% 
+  rownames_to_column() %>%
+  `colnames<-`(c("feature","importance"))
+
+# plot dataframe
+ggplot(feat_imp_df, aes(x = reorder(feature, importance), 
+                        y = importance)) +
+  geom_bar(stat='identity') +
+  coord_flip() +
+  theme_classic() +
+  labs(
+    x     = "Feature",
+    y     = "Importance",
+    title = "Feature Importance: <Model>"
+  )
 ### Nothing beyond here works!
 # To do: Test the best parameters with the test data set to see if it works good.
 
