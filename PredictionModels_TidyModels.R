@@ -74,16 +74,6 @@ data_tidy <- modeldata %>%
   #There are some missing values so we're going to impute them.
   missRanger(num.trees = 100)
 
-# ##Change Reference Levels
-# levels(modeldata$completedint)
-# modeldata$completedint <- relevel(modeldata$completedint, ref = "Y")
-# 
-# levels(modeldata$race)
-# modeldata$race <- relevel(modeldata$race, ref = "white") ##white as reference category
-# 
-# levels(modeldata$ethnicity)
-# modeldata$ethnicity <- relevel(modeldata$ethnicity, ref = "not_hispanic")
-
 
 
 ####
@@ -96,7 +86,6 @@ mod <- data_tidy %>%
 
 ##92% yes and 8% no
 ## will need data splitting strategy and resample to balance
-### NOTE: anytime 'children' is referenced  in the source doc it refers to 'completedint' (completed interviews) in our data
 
 
 # Create data splits ------------------------------------------------------
@@ -120,10 +109,6 @@ data_test  %>%
   count(completed_interview) %>% 
   mutate(prop = n/sum(n))
 
-# We'll use the validation_split() function to allocate 20% of the hotel_other stays to the validation set and 
-# 30,000 stays to the training set. This means that our model performance metrics will be computed on a single set 
-# of 7,500 hotel stays. This is fairly large, so the amount of data should provide enough precision to be a 
-# reliable indicator for how well each model predicts the outcome with a single iteration of resampling.
 
 set.seed(234)
 val_set <- validation_split(data_non_test, 
@@ -132,33 +117,15 @@ val_set <- validation_split(data_non_test,
 val_set
 
 
-# This function, like initial_split(), has the same strata argument, which uses stratified sampling to create 
-# the resample. This means that we'll have roughly the same proportions of hotel stays with and without children 
-# in our new validation and training sets, as compared to the original hotel_other proportions.
-
 
 
 # ## First Model: Penalized Logistic Regression ---------------------------
 
 
-# ### Since our outcome variable children is categorical, logistic regression would be a good first model to start.
-# Let's use a model that can perform feature selection during training. 
-# The glmnet R package fits a generalized linear model via penalized maximum likelihood. 
-# This method of estimating the logistic regression slope parameters uses a penalty on the process so that
-# less relevant predictors are driven towards a value of zero. One of the glmnet penalization methods, 
-# called the lasso method, can actually set the predictor slopes to zero if a large enough penalty is used.
-
 
 lr_mod <- 
   logistic_reg(penalty = tune(), mixture = 1) %>% 
   set_engine("glmnet")
-
-
-
-# We'll set the penalty argument to tune() as a placeholder for now. 
-# This is a model hyperparameter that we will tune to find the best value for making predictions with our data. 
-# Setting mixture to a value of one means that the glmnet model will potentially remove irrelevant predictors 
-# and choose a simpler model.
 
 
 holidays <- c("AllSouls", "AshWednesday", "ChristmasEve", "Easter", 
@@ -224,7 +191,7 @@ lr_best <-
   collect_metrics() %>% 
   arrange(penalty) %>% 
   slice(13)
-lr_best
+lr_best %>%
 
 # Plot AUC for our best model
 lr_auc <- 
@@ -343,67 +310,31 @@ ggplot(feat_imp_df, aes(x = reorder(feature, importance),
     y     = "Importance",
     title = "Feature Importance: <Model>"
   )
-### Nothing beyond here works!
-# To do: Test the best parameters with the test data set to see if it works good.
 
 
-# 
-# # Let's test the model we like --------------------------------------------
-# # the best model
-# last_rf_mod <- 
-#   rand_forest(mtry = 14, min_n = 26, trees = 1000) %>% 
-#   set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
-#   set_mode("classification")
-# 
-# rf_recipe_test <- 
-#   recipe(completed_interview ~ ., data = data_test) %>% 
-#   step_date(interview_initiate_date) %>% 
-#   step_holiday(interview_initiate_date) %>% 
-#   step_rm(interview_initiate_date) 
-# 
-# # the last workflow
-# last_rf_workflow <- 
-#   rf_workflow %>% 
-#   update_model(last_rf_mod) %>%
-#   update_recipe(rf_recipe_test)
-# 
-# set.seed(345)
-# last_rf_fit <- 
-#   last_rf_workflow 
-# 
-# last_rf_fit %>% 
-#   collect_metrics()
-# 
-# rf_auc <- 
-#   rf_res %>% 
-#   collect_predictions(parameters = rf_best) %>% 
-#   roc_curve(completed_interview, .pred_FALSE) %>% 
-#   mutate(model = "Random Forest")
-# 
-# # Deeper dive into the best RF model ---------------------------------
-# 
-# # the last model
-# last_rf_mod <- 
-#   rand_forest(mtry = 14, min_n = 26, trees = 1000) %>% 
-#   set_engine("ranger", num.threads = cores, importance = "impurity") %>% 
-#   set_mode("classification")
-# 
-# # the last workflow
-# last_rf_workflow <- 
-#   rf_workflow %>% 
-#   update_model(last_rf_mod)
-# 
-# # the last fit
-# set.seed(345)
-# last_rf_fit <- 
-#   last_rf_workflow %>% 
-#   last_fit(splits)
-# 
-# last_rf_fit
-# 
-# last_rf_fit %>% 
-#   collect_metrics()
-# 
-# last_rf_fit %>% 
-#   extract_fit_parsnip() %>% 
-#   vip(num_features = 20)
+# AUC for Test Set --------------------------------------------------------
+
+#From here, mostly https://www.tidymodels.org/start/recipes/#predict-workflow
+lr_best_parsnip_model <- lr_workflow %>%
+  finalize_workflow(lr_best) %>%
+  fit(data_non_test)
+
+lr_aug<- augment(lr_best_parsnip_model,data_non_test)
+
+lr_aug %>%
+  select(completed_interview,.pred_class,.pred_FALSE,.pred_TRUE) %>%
+  mutate(correct  = (completed_interview == .pred_class)) %>%
+  summarize(pct_correct = sum(correct)/n())
+
+# 91.8% correct
+
+lr_aug %>%
+  roc_curve(truth = completed_interview,.pred_FALSE) %>%
+  autoplot()
+
+lr_aug %>%
+  roc_auc(truth = completed_interview,.pred_FALSE)
+
+# Area under the curve - 0.769.
+
+
