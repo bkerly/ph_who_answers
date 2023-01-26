@@ -47,7 +47,7 @@ data_tidy <- modeldata %>%
     race = relevel(as.factor(race), ref = "black"),
     ethnicity = (ethnicity == "hispanic") %>% as.numeric(), #What if nonwhite, non male was the default? Let's try it once maybe!
     interpreter_required = (interpreter_required == "yes") %>% as.numeric(),
-    county = county,
+    #county = county,
     tract_poptotal = tract_poptotal,
     tract_popdensitysqmi = tract_popdensitysqmi,
     tract_nhl_wa = tract_nhl_wa,
@@ -127,6 +127,19 @@ lr_mod <-
   logistic_reg(penalty = tune(), mixture = 1) %>% 
   set_engine("glmnet")
 
+# Penalty is really "lambda", see here https://developers.google.com/machine-learning/crash-course/regularization-for-simplicity/lambda
+
+# If your lambda value is too high, your model will be simple, but you run the risk of underfitting your data. Your model won't learn enough about the training data to make useful predictions.
+# 
+# If your lambda value is too low, your model will be more complex, and you run the risk of overfitting your data. Your model will learn too much about the particularities of the training data, and won't be able to generalize to new data.
+
+# mixture is really teh ratio of pure ridge model (alpha = 0) and pure lasso model (alpha = 1). So for this one we are useing a pure lasso model. 
+
+# Limitation of Ridge Regression: Ridge regression decreases the complexity of a model but does not reduce the number of variables since it never leads to a coefficient been zero rather only minimizes it. Hence, this model is not good for feature reduction.
+
+# Lasso regression stands for Least Absolute Shrinkage and Selection Operator. Lasso sometimes struggles with some types of data. If the number of predictors (p) is greater than the number of observations (n), Lasso will pick at most n predictors as non-zero, even if all predictors are relevant (or may be used in the test set).
+# If there are two or more highly collinear variables then LASSO regression select one of them randomly which is not good for the interpretation of data
+
 
 holidays <- c("AllSouls", "AshWednesday", "ChristmasEve", "Easter", 
               "ChristmasDay", "GoodFriday", "NewYearsDay", "PalmSunday")
@@ -181,7 +194,7 @@ lr_plot
 
 top_models <-
   lr_res %>% 
-  show_best("roc_auc", n = 15) %>% 
+  show_best("roc_auc", n = 5) %>% 
   arrange(penalty) 
 top_models
 
@@ -190,8 +203,8 @@ lr_best <-
   lr_res %>% 
   collect_metrics() %>% 
   arrange(penalty) %>% 
-  slice(13)
-lr_best %>%
+  slice(25)
+lr_best
 
 # Plot AUC for our best model
 lr_auc <- 
@@ -209,7 +222,10 @@ extracted_linear_model <- lr_workflow %>%
   fit(data_non_test) %>%
   extract_fit_parsnip() %>%
   tidy() %>%
-  arrange(desc(abs(estimate)))
+  arrange(desc(abs(estimate))) %>%
+  filter(estimate != 0)
+
+write_csv(extracted_linear_model,"extracted_linear_model.csv")
 
 
 # Random forest model -----------------------------------------------------
@@ -304,36 +320,127 @@ ggplot(feat_imp_df, aes(x = reorder(feature, importance),
                         y = importance)) +
   geom_bar(stat='identity') +
   coord_flip() +
-  theme_classic() +
+  theme_fivethirtyeight() +
   labs(
     x     = "Feature",
     y     = "Importance",
-    title = "Feature Importance: <Model>"
+    title = "Feature Importance: Random Forest Model"
   )
 
 
 # AUC for Test Set --------------------------------------------------------
+
+
 
 #From here, mostly https://www.tidymodels.org/start/recipes/#predict-workflow
 lr_best_parsnip_model <- lr_workflow %>%
   finalize_workflow(lr_best) %>%
   fit(data_non_test)
 
-lr_aug<- augment(lr_best_parsnip_model,data_non_test)
 
-lr_aug %>%
+# LR Data_non_test --------------------------------------------------------
+
+
+
+lr_aug_non_test<- augment(lr_best_parsnip_model,data_non_test)
+
+lr_aug_non_test %>%
+  select(completed_interview,.pred_class,.pred_FALSE,.pred_TRUE) %>%
+  mutate(correct  = (completed_interview == .pred_class)) %>%
+  summarize(pct_correct = sum(correct)/n())
+
+#  91.44% correct
+
+lr_aug_non_test %>%
+  roc_curve(truth = completed_interview,.pred_FALSE) %>%
+  autoplot()
+
+lr_aug_non_test %>%
+  roc_auc(truth = completed_interview,.pred_FALSE)
+# Area under the curve = 0.757
+
+
+# LR_Data_Test ------------------------------------------------------------
+
+
+
+lr_aug_test<- augment(lr_best_parsnip_model,data_test)
+
+lr_aug_test %>%
   select(completed_interview,.pred_class,.pred_FALSE,.pred_TRUE) %>%
   mutate(correct  = (completed_interview == .pred_class)) %>%
   summarize(pct_correct = sum(correct)/n())
 
 # 91.8% correct
 
-lr_aug %>%
+lr_aug_test_auc <-lr_aug_test %>%
+  roc_curve(truth = completed_interview,.pred_FALSE) %>% 
+  mutate(model = "Linear Regression")
+
+lr_aug_test_auc %>% autoplot()
+
+
+
+lr_aug_test %>%
+  roc_auc(truth = completed_interview,.pred_FALSE)
+
+
+# RF Data Non Test --------------------------------------------------------
+
+
+rf_best_parsnip_model<- rf_workflow %>%
+  finalize_workflow(rf_best) %>%
+  fit(data_non_test) 
+
+
+rf_aug_non_test<- augment(rf_best_parsnip_model,data_non_test)
+
+rf_aug_non_test %>%
+  select(completed_interview,.pred_class,.pred_FALSE,.pred_TRUE) %>%
+  mutate(correct  = (completed_interview == .pred_class)) %>%
+  summarize(pct_correct = sum(correct)/n())
+
+# 91.8% correct
+
+rf_aug_non_test %>%
   roc_curve(truth = completed_interview,.pred_FALSE) %>%
   autoplot()
 
-lr_aug %>%
+rf_aug_non_test %>%
   roc_auc(truth = completed_interview,.pred_FALSE)
-# Area under the curve - 0.769.
+# Area under the curve = 0.769.
 
 
+# RF Data Test ------------------------------------------------------------
+
+
+rf_aug_test<- augment(rf_best_parsnip_model,data_test)
+
+rf_aug_test %>%
+  select(completed_interview,.pred_class,.pred_FALSE,.pred_TRUE) %>%
+  mutate(correct  = (completed_interview == .pred_class)) %>%
+  summarize(pct_correct = sum(correct)/n())
+
+# 91.8% correct
+
+rf_aug_test_auc <- rf_aug_test %>%
+  roc_curve(truth = completed_interview,.pred_FALSE) %>% 
+  mutate(model = "Random Forest")
+
+rf_aug_test_auc %>% autoplot()
+
+rf_aug_test %>%
+  roc_auc(truth = completed_interview,.pred_FALSE)
+
+
+# Final Graph -------------------------------------------------------------
+
+bind_rows(rf_aug_test_auc, lr_aug_test_auc) %>% 
+  select(-.threshold) %>%
+  ggplot() + 
+  geom_path(aes(x = 1 - specificity, y = sensitivity, color = model),
+            linewidth = 1.5, alpha = 0.8) +
+  geom_abline(linetype = 3,linewidth = 1) + 
+  #coord_equal() + 
+  theme_fivethirtyeight() +
+  labs(color = "Model")
