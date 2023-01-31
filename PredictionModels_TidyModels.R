@@ -306,8 +306,8 @@ extracted_rf_model <- rf_workflow %>%
   fit(data_non_test) %>%
   extract_fit_engine() 
 
-extracted_rf_model %>%
-  ranger::importance_pvalues(method = "janitza")
+# extracted_rf_model %>%
+#   ranger::importance_pvalues(method = "janitza")
 
 # Plot variable importance
 feat_imp_df <- importance(extracted_rf_model) %>% 
